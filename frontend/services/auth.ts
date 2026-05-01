@@ -1,6 +1,9 @@
-const API_BASE_URL = process.env.NEXT_PUBLIC_API_URL || "http://localhost:5000/api";
-const TOKEN_KEY = "auth_token";
-const STORAGE_TYPE = "both"; // "cookies", "localStorage", or "both"
+/**
+ * Authentication Service
+ * Handles user authentication, token storage, and retrieval
+ */
+
+const API_BASE_URL = process.env.NEXT_PUBLIC_API_URL || 'http://localhost:5000/api';
 
 interface LoginResponse {
   token: string;
@@ -11,166 +14,144 @@ interface LoginResponse {
   };
 }
 
-interface AuthError {
-  message: string;
-  status: number;
+interface RegisterResponse {
+  token: string;
+  user: {
+    id: string;
+    email: string;
+    name: string;
+  };
 }
 
-// Utility functions for storage
-const storageUtils = {
-  setToken: (token: string) => {
+// Token storage utilities
+const TokenStorage = {
+  // Store token in both localStorage and cookies
+  setToken: (token: string, rememberMe: boolean = false) => {
     // Store in localStorage
-    if (typeof window !== "undefined") {
-      localStorage.setItem(TOKEN_KEY, token);
-    }
-
-    // Store in cookies
-    if (typeof window !== "undefined") {
-      const maxAge = 7 * 24 * 60 * 60; // 7 days in seconds
-      document.cookie = `${TOKEN_KEY}=${token}; path=/; max-age=${maxAge}; samesite=strict`;
+    if (typeof window !== 'undefined') {
+      localStorage.setItem('authToken', token);
+      
+      // Store in cookies with expiration based on rememberMe
+      const expirationDays = rememberMe ? 30 : 1;
+      const expirationDate = new Date();
+      expirationDate.setDate(expirationDate.getDate() + expirationDays);
+      
+      // Set cookie
+      document.cookie = `authToken=${token}; expires=${expirationDate.toUTCString()}; path=/; SameSite=Strict`;
     }
   },
 
+  // Get token from localStorage or cookies
   getToken: (): string | null => {
-    if (typeof window === "undefined") return null;
-
-    // Try localStorage first
-    const localToken = localStorage.getItem(TOKEN_KEY);
-    if (localToken) return localToken;
-
-    // Fall back to cookies
-    const cookieValue = document.cookie
-      .split("; ")
-      .find((row) => row.startsWith(`${TOKEN_KEY}=`))
-      ?.split("=")[1];
-
-    return cookieValue || null;
+    if (typeof window !== 'undefined') {
+      return localStorage.getItem('authToken');
+    }
+    return null;
   },
 
+  // Remove token from both storage methods
   removeToken: () => {
-    if (typeof window === "undefined") return;
-
-    // Remove from localStorage
-    localStorage.removeItem(TOKEN_KEY);
-
-    // Remove from cookies
-    document.cookie = `${TOKEN_KEY}=; path=/; max-age=0`;
+    if (typeof window !== 'undefined') {
+      localStorage.removeItem('authToken');
+      // Clear cookie
+      document.cookie = 'authToken=; expires=Thu, 01 Jan 1970 00:00:00 UTC; path=/;';
+    }
   },
 
+  // Check if token exists
   hasToken: (): boolean => {
-    return storageUtils.getToken() !== null;
-  },
+    if (typeof window !== 'undefined') {
+      return !!localStorage.getItem('authToken');
+    }
+    return false;
+  }
 };
 
-// Authentication API calls
 export const auth = {
-  login: async (email: string, password: string): Promise<LoginResponse> => {
+  /**
+   * Login user with email and password
+   */
+  login: async (email: string, password: string, rememberMe: boolean = false): Promise<LoginResponse> => {
     try {
       const response = await fetch(`${API_BASE_URL}/auth/login`, {
-        method: "POST",
+        method: 'POST',
         headers: {
-          "Content-Type": "application/json",
+          'Content-Type': 'application/json',
         },
         body: JSON.stringify({ email, password }),
       });
 
       if (!response.ok) {
-        const error = await response.json();
-        throw {
-          message: error.message || "Login failed",
-          status: response.status,
-        } as AuthError;
+        const errorData = await response.json();
+        throw new Error(errorData.message || 'Login failed');
       }
 
       const data: LoginResponse = await response.json();
-
-      // Store token
-      storageUtils.setToken(data.token);
-
+      
+      // Store the JWT token
+      TokenStorage.setToken(data.token, rememberMe);
+      
       return data;
-    } catch (error) {
-      throw error;
+    } catch (error: any) {
+      throw new Error(error.message || 'An error occurred during login');
     }
   },
 
-  register: async (
-    name: string,
-    email: string,
-    password: string
-  ): Promise<LoginResponse> => {
+  /**
+   * Register new user
+   */
+  register: async (name: string, email: string, password: string): Promise<RegisterResponse> => {
     try {
       const response = await fetch(`${API_BASE_URL}/auth/register`, {
-        method: "POST",
+        method: 'POST',
         headers: {
-          "Content-Type": "application/json",
+          'Content-Type': 'application/json',
         },
         body: JSON.stringify({ name, email, password }),
       });
 
       if (!response.ok) {
-        const error = await response.json();
-        throw {
-          message: error.message || "Registration failed",
-          status: response.status,
-        } as AuthError;
+        const errorData = await response.json();
+        throw new Error(errorData.message || 'Registration failed');
       }
 
-      const data: LoginResponse = await response.json();
-
-      // Optionally store token after registration
-      if (data.token) {
-        storageUtils.setToken(data.token);
-      }
-
+      const data: RegisterResponse = await response.json();
+      
+      // Optionally store the JWT token after registration
+      TokenStorage.setToken(data.token, false);
+      
       return data;
-    } catch (error) {
-      throw error;
+    } catch (error: any) {
+      throw new Error(error.message || 'An error occurred during registration');
     }
   },
 
+  /**
+   * Logout user
+   */
   logout: () => {
-    storageUtils.removeToken();
+    TokenStorage.removeToken();
   },
 
+  /**
+   * Get stored token
+   */
   getToken: (): string | null => {
-    return storageUtils.getToken();
+    return TokenStorage.getToken();
   },
 
-  hasToken: (): boolean => {
-    return storageUtils.hasToken();
-  },
-
-  clearAuth: () => {
-    storageUtils.removeToken();
-  },
-
+  /**
+   * Check if user is authenticated
+   */
   isAuthenticated: (): boolean => {
-    return storageUtils.hasToken();
+    return TokenStorage.hasToken();
   },
 
-  // Decode JWT to get payload (without verification)
-  decodeToken: (token: string) => {
-    try {
-      const base64Url = token.split(".")[1];
-      const base64 = base64Url.replace(/-/g, "+").replace(/_/g, "/");
-      const jsonPayload = decodeURIComponent(
-        atob(base64)
-          .split("")
-          .map((c) => "%" + ("00" + c.charCodeAt(0).toString(16)).slice(-2))
-          .join("")
-      );
-
-      return JSON.parse(jsonPayload);
-    } catch (error) {
-      return null;
-    }
-  },
-
-  // Check if token is expired
-  isTokenExpired: (token: string): boolean => {
-    const payload = auth.decodeToken(token);
-    if (!payload || !payload.exp) return true;
-
-    return Date.now() >= payload.exp * 1000;
+  /**
+   * Get authorization header for API calls
+   */
+  getAuthHeader: () => {
+    const token = TokenStorage.getToken();
+    return token ? { Authorization: `Bearer ${token}` } : {};
   },
 };
