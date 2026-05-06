@@ -1,6 +1,7 @@
 'use client';
 
 import { useState } from 'react';
+import { summaryService } from '@/services/summary';
 
 interface SummaryDisplayProps {
   documentId: string;
@@ -9,6 +10,7 @@ interface SummaryDisplayProps {
   status?: 'completed' | 'processing' | 'pending';
   flashcardsCount?: number;
   onClose?: () => void;
+  onRegenerate?: (newSummary: string) => void;
 }
 
 export default function SummaryDisplay({
@@ -18,9 +20,12 @@ export default function SummaryDisplay({
   status = 'completed',
   flashcardsCount = 0,
   onClose,
+  onRegenerate,
 }: SummaryDisplayProps) {
   const [copied, setCopied] = useState(false);
   const [isExpanded, setIsExpanded] = useState(false);
+  const [isRegenerating, setIsRegenerating] = useState(false);
+  const [isDownloading, setIsDownloading] = useState(false);
 
   const handleCopySummary = async () => {
     try {
@@ -29,6 +34,46 @@ export default function SummaryDisplay({
       setTimeout(() => setCopied(false), 2000);
     } catch (err) {
       console.error('Failed to copy:', err);
+    }
+  };
+
+  const handleDownload = async (format: 'pdf' | 'docx' | 'txt' = 'pdf') => {
+    try {
+      setIsDownloading(true);
+      const blob = await summaryService.exportSummary(documentId, format);
+      
+      // Create a download link
+      const url = window.URL.createObjectURL(blob);
+      const a = document.createElement('a');
+      a.href = url;
+      a.download = `${documentName}.${format === 'docx' ? 'docx' : format === 'txt' ? 'txt' : 'pdf'}`;
+      document.body.appendChild(a);
+      a.click();
+      
+      window.URL.revokeObjectURL(url);
+      document.body.removeChild(a);
+    } catch (err) {
+      console.error('Failed to download:', err);
+      alert('Failed to download summary');
+    } finally {
+      setIsDownloading(false);
+    }
+  };
+
+  const handleRegenerate = async () => {
+    try {
+      setIsRegenerating(true);
+      const newSummary = await summaryService.generateSummary({
+        documentId,
+        summaryType: 'detailed',
+      });
+      
+      onRegenerate?.(newSummary.summary);
+    } catch (err) {
+      console.error('Failed to regenerate:', err);
+      alert('Failed to regenerate summary');
+    } finally {
+      setIsRegenerating(false);
     }
   };
 
@@ -122,7 +167,8 @@ export default function SummaryDisplay({
           <div className="flex flex-wrap gap-3 mt-6 pt-6 border-t border-gray-200">
             <button
               onClick={handleCopySummary}
-              className={`flex items-center gap-2 px-4 py-2 rounded-lg font-semibold transition ${
+              disabled={isRegenerating || isDownloading}
+              className={`flex items-center gap-2 px-4 py-2 rounded-lg font-semibold transition disabled:opacity-50 disabled:cursor-not-allowed ${
                 copied
                   ? 'bg-green-100 text-green-700'
                   : 'bg-blue-100 text-blue-700 hover:bg-blue-200'
@@ -132,19 +178,53 @@ export default function SummaryDisplay({
               {copied ? 'Copied!' : 'Copy Summary'}
             </button>
 
-            <button className="flex items-center gap-2 px-4 py-2 rounded-lg font-semibold bg-purple-100 text-purple-700 hover:bg-purple-200 transition">
+            <button className="flex items-center gap-2 px-4 py-2 rounded-lg font-semibold bg-purple-100 text-purple-700 hover:bg-purple-200 transition disabled:opacity-50 disabled:cursor-not-allowed">
               <span>🎴</span>
               View Flashcards
             </button>
 
-            <button className="flex items-center gap-2 px-4 py-2 rounded-lg font-semibold bg-gray-100 text-gray-700 hover:bg-gray-200 transition">
-              <span>📥</span>
-              Download
-            </button>
+            <div className="relative inline-block group">
+              <button
+                onClick={() => handleDownload('pdf')}
+                disabled={isDownloading || isRegenerating}
+                className="flex items-center gap-2 px-4 py-2 rounded-lg font-semibold bg-gray-100 text-gray-700 hover:bg-gray-200 transition disabled:opacity-50 disabled:cursor-not-allowed"
+              >
+                <span>{isDownloading ? '⏳' : '📥'}</span>
+                {isDownloading ? 'Downloading...' : 'Download'}
+              </button>
+              {/* Download format options on hover */}
+              <div className="absolute left-0 mt-1 w-32 bg-white border border-gray-200 rounded-lg shadow-lg opacity-0 invisible group-hover:opacity-100 group-hover:visible transition-all z-10">
+                <button
+                  onClick={() => handleDownload('pdf')}
+                  disabled={isDownloading}
+                  className="block w-full text-left px-4 py-2 text-sm text-gray-700 hover:bg-gray-100 first:rounded-t-lg disabled:opacity-50"
+                >
+                  📄 PDF
+                </button>
+                <button
+                  onClick={() => handleDownload('docx')}
+                  disabled={isDownloading}
+                  className="block w-full text-left px-4 py-2 text-sm text-gray-700 hover:bg-gray-100 disabled:opacity-50"
+                >
+                  📝 Word
+                </button>
+                <button
+                  onClick={() => handleDownload('txt')}
+                  disabled={isDownloading}
+                  className="block w-full text-left px-4 py-2 text-sm text-gray-700 hover:bg-gray-100 last:rounded-b-lg disabled:opacity-50"
+                >
+                  📄 Text
+                </button>
+              </div>
+            </div>
 
-            <button className="flex items-center gap-2 px-4 py-2 rounded-lg font-semibold bg-indigo-100 text-indigo-700 hover:bg-indigo-200 transition">
-              <span>🔄</span>
-              Regenerate
+            <button
+              onClick={handleRegenerate}
+              disabled={isRegenerating || isDownloading}
+              className="flex items-center gap-2 px-4 py-2 rounded-lg font-semibold bg-indigo-100 text-indigo-700 hover:bg-indigo-200 transition disabled:opacity-50 disabled:cursor-not-allowed"
+            >
+              <span>{isRegenerating ? '⏳' : '🔄'}</span>
+              {isRegenerating ? 'Regenerating...' : 'Regenerate'}
             </button>
           </div>
         </div>
